@@ -57,9 +57,13 @@ function useStoredData() {
       return {
         ...initialData,
         ...stored,
-        appointments: stored.appointments || [],
-        tasks: stored.tasks || [],
-        debts: (stored.debts || []).map(debt => ({ ...debt, history: debt.history || [] }))
+        accounts: Array.isArray(stored.accounts) ? stored.accounts : initialData.accounts,
+        categories: Array.isArray(stored.categories) ? stored.categories : initialData.categories,
+        transactions: Array.isArray(stored.transactions) ? stored.transactions : [],
+        appointments: Array.isArray(stored.appointments) ? stored.appointments : [],
+        tasks: Array.isArray(stored.tasks) ? stored.tasks : [],
+        shopping: Array.isArray(stored.shopping) ? stored.shopping : [],
+        debts: (Array.isArray(stored.debts) ? stored.debts : []).map(debt => ({ ...debt, history: Array.isArray(debt.history) ? debt.history : [] }))
       };
     }
     catch { return initialData; }
@@ -99,14 +103,15 @@ function App() {
       const date = new Date(transaction.date);
       return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
     };
-    const accountBalances = Object.fromEntries(data.accounts.map(account => {
+    const accountBalances = data.accounts.reduce((balances, account) => {
       const movement = data.transactions.filter(transaction => transaction.accountId === account.id).reduce((sum, transaction) => sum + (transaction.type === 'income' ? Number(transaction.amount) : -Number(transaction.amount)), 0);
-      return [account.id, Number(account.balance) + movement];
-    }));
+      balances[account.id] = Number(account.balance) + movement;
+      return balances;
+    }, {});
     const monthlyTransactions = data.transactions.filter(isCurrentMonth);
     const income = monthlyTransactions.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
     const expense = monthlyTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
-    const balance = Object.values(accountBalances).reduce((sum, value) => sum + value, 0);
+    const balance = data.accounts.reduce((sum, account) => sum + (accountBalances[account.id] || 0), 0);
     return { income, expense, balance, accountBalances };
   }, [data]);
 

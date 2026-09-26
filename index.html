@@ -10,7 +10,22 @@
     <title>ميزان</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main class="boot-screen" id="boot-screen">
+        <img src="/icon.svg" alt="" width="58" height="58" />
+        <strong>جارٍ تشغيل ميزان…</strong>
+        <p id="boot-message">لحظات ونجهّز بياناتك.</p>
+      </main>
+    </div>
+    <noscript><p class="no-script">يحتاج ميزان إلى تفعيل JavaScript في المتصفح.</p></noscript>
+    <script>
+      window.__mizanStarted = false;
+      window.setTimeout(function () {
+        if (window.__mizanStarted) return;
+        var message = document.getElementById('boot-message');
+        if (message) message.textContent = 'تعذّر تحميل التطبيق. حدّث الصفحة أو امسح بيانات الموقع من إعدادات المتصفح.';
+      }, 8000);
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
