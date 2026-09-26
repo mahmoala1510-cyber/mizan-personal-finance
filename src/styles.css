@@ -56,6 +56,8 @@ main { min-height: calc(100vh - 154px); }
 .balance-panel { background: var(--ink); color: #fff; padding: 24px 25px 21px; border-radius: 24px 8px 24px 24px; position: relative; overflow: hidden; }
 .balance-panel::after { content: ''; position: absolute; width: 190px; height: 190px; border: 1px solid rgba(255,255,255,.08); border-radius: 50%; left: -70px; top: -90px; box-shadow: 0 0 0 26px rgba(255,255,255,.025); pointer-events: none; }
 .balance-head { display: flex; justify-content: space-between; color: rgba(255,255,255,.62); font-size: 12px; }
+.balance-head button { width: 34px; height: 28px; margin: -6px -6px 0 0; border: 0; border-radius: 9px; background: transparent; color: inherit; display: grid; place-items: center; cursor: pointer; }
+.balance-head button:hover { background: rgba(255,255,255,.1); color: white; }
 .total-balance { display: block; font-size: clamp(30px,5vw,40px); margin: 5px 0 23px; letter-spacing: -1.5px; }
 .money-flow { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.13); }
 .money-flow > div { display: grid; grid-template-columns: 38px 1fr; column-gap: 9px; align-items: center; }
@@ -75,6 +77,7 @@ progress::-moz-progress-bar { background: var(--copper); }
 .quick-actions { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 11px; margin-top: 13px; }
 .quick-action { min-height: 72px; border: 1px solid var(--line); background: var(--surface); border-radius: 18px 6px 18px 18px; padding: 12px 14px; display: grid; grid-template-columns: 38px minmax(0,1fr) auto; align-items: center; gap: 10px; text-align: right; cursor: pointer; transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
 .quick-action:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(25,48,42,.08); }
+.quick-action:active { transform: translateY(0) scale(.985); }
 .quick-action > span:first-child { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px; }
 .quick-action.income > span:first-child { color: #26705c; background: #e3f0e9; }
 .quick-action.expense > span:first-child { color: #a65c38; background: #f4e9df; }
@@ -232,6 +235,26 @@ progress::-moz-progress-bar { background: var(--copper); }
 .debt-history h3 { margin: 3px 0 6px; font-size: 10px; }
 .debt-history > div { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-top: 1px solid #ecece7; font-size: 8px; color: var(--muted); }
 .debt-history b { color: var(--ink); }
+.balance-details { display: grid; gap: 13px; }
+.balance-details-total { background: var(--ink); color: white; border-radius: 19px 7px 19px 19px; padding: 18px; }
+.balance-details-total span, .balance-details-total small { display: block; color: rgba(255,255,255,.6); font-size: 8px; }
+.balance-details-total strong { display: block; font-size: 26px; margin: 4px 0 7px; }
+.balance-account-list { border: 1px solid var(--line); background: var(--surface); border-radius: 15px; padding: 2px 13px; }
+.balance-account-list > div { min-height: 53px; display: grid; grid-template-columns: 7px minmax(0,1fr) auto; gap: 10px; align-items: center; border-bottom: 1px solid #ecece7; }
+.balance-account-list > div:last-child { border-bottom: 0; }
+.balance-account-list i { width: 7px; height: 29px; border-radius: 7px; }
+.balance-account-list strong, .balance-account-list small { display: block; }
+.balance-account-list strong { font-size: 10px; }
+.balance-account-list small { color: var(--muted); font-size: 7px; margin-top: 2px; }
+.balance-account-list b { font-size: 10px; }
+.month-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.month-summary > div { border: 1px solid var(--line); background: var(--surface); border-radius: 13px; padding: 11px; }
+.month-summary span, .month-summary b { display: block; }
+.month-summary span { color: var(--muted); font-size: 8px; margin-bottom: 4px; }
+.month-summary b { font-size: 11px; }
+.month-summary .income { color: #20715b; }
+.month-summary .expense { color: #a9573d; }
+.calculation-note { margin: 0; color: var(--muted); background: #e5eee9; border-radius: 12px; padding: 10px; display: flex; align-items: center; gap: 7px; font-size: 8px; line-height: 1.6; }
 .color-row { display: flex; gap: 11px; }
 .color-row button { width: 36px; height: 36px; border-radius: 11px; border: 3px solid var(--paper); box-shadow: 0 0 0 1px var(--line); cursor: pointer; }
 .color-row button.active { box-shadow: 0 0 0 2px var(--ink); }

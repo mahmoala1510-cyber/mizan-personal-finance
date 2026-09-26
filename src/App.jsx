@@ -94,10 +94,20 @@ function App() {
   }, [data.appointments]);
 
   const totals = useMemo(() => {
-    const income = data.transactions.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
-    const expense = data.transactions.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
-    const balance = data.accounts.reduce((s, a) => s + Number(a.balance), 0) + income - expense;
-    return { income, expense, balance };
+    const now = new Date();
+    const isCurrentMonth = transaction => {
+      const date = new Date(transaction.date);
+      return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+    };
+    const accountBalances = Object.fromEntries(data.accounts.map(account => {
+      const movement = data.transactions.filter(transaction => transaction.accountId === account.id).reduce((sum, transaction) => sum + (transaction.type === 'income' ? Number(transaction.amount) : -Number(transaction.amount)), 0);
+      return [account.id, Number(account.balance) + movement];
+    }));
+    const monthlyTransactions = data.transactions.filter(isCurrentMonth);
+    const income = monthlyTransactions.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+    const expense = monthlyTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+    const balance = Object.values(accountBalances).reduce((sum, value) => sum + value, 0);
+    return { income, expense, balance, accountBalances };
   }, [data]);
 
   const notify = message => {
@@ -167,7 +177,7 @@ function App() {
         </nav>
       </div>
 
-      {modal && <Modal type={modal} data={data} setData={setData} onClose={() => setModal(null)} onTransaction={addTransaction} notify={notify} />}
+      {modal && <Modal type={modal} data={data} totals={totals} setData={setData} onClose={() => setModal(null)} onTransaction={addTransaction} notify={notify} />}
       <div className={`toast ${toast ? 'show' : ''}`} role="status" aria-live="polite"><Check size={18} />{toast}</div>
     </div>
   );
@@ -188,7 +198,7 @@ function HomeView({ data, totals, onNavigate, onAdd }) {
     <div className="welcome"><div><p>مساء الخير</p><h1>هذه نظرتك المالية</h1></div><span>{month}</span></div>
 
     <section className="balance-panel" aria-labelledby="balance-title">
-      <div className="balance-head"><span id="balance-title">صافي الرصيد</span><MoreHorizontal size={22} /></div>
+      <div className="balance-head"><span id="balance-title">صافي الرصيد الفعلي</span><button type="button" onClick={() => onAdd('balanceDetails')} aria-label="عرض تفاصيل الرصيد"><MoreHorizontal size={22} /></button></div>
       <strong className="total-balance"><bdi>{money(totals.balance)}</bdi></strong>
       <div className="money-flow">
         <div><span className="flow-icon income"><ArrowDownLeft size={18} /></span><p>الدخل</p><b><bdi>{money(totals.income)}</bdi></b></div>
@@ -198,12 +208,12 @@ function HomeView({ data, totals, onNavigate, onAdd }) {
     </section>
 
     <section className="quick-actions" aria-label="إضافة عملية مالية">
-      <button className="quick-action income" onClick={() => onAdd('incomeTransaction')}>
+      <button type="button" className="quick-action income" onClick={() => onAdd('incomeTransaction')}>
         <span><ArrowDownLeft size={21} /></span>
         <span><strong>إضافة دخل</strong><small>اختر الحساب وسجّل المبلغ</small></span>
         <Plus size={18} />
       </button>
-      <button className="quick-action expense" onClick={() => onAdd('expenseTransaction')}>
+      <button type="button" className="quick-action expense" onClick={() => onAdd('expenseTransaction')}>
         <span><ArrowUpRight size={21} /></span>
         <span><strong>إضافة مصروف</strong><small>سجّل الدفع أو اربطه بدين</small></span>
         <Plus size={18} />
@@ -215,7 +225,7 @@ function HomeView({ data, totals, onNavigate, onAdd }) {
       <div className="account-strip">
         {data.accounts.map((account, index) => <article className="account-card" key={account.id} style={{ '--account-color': account.color }}>
           <span className="account-icon">{index % 2 ? <CreditCard /> : <WalletCards />}</span>
-          <div><p>{account.name}</p><strong><bdi>{money(account.balance)}</bdi></strong><small>{account.type}</small></div>
+          <div><p>{account.name}</p><strong><bdi>{money(totals.accountBalances[account.id] ?? account.balance)}</bdi></strong><small>{account.type} · الرصيد الحالي</small></div>
         </article>)}
       </div>
     </section>
@@ -231,9 +241,10 @@ function TransactionList({ transactions, data, onDelete }) {
   if (!transactions.length) return <Empty icon={ReceiptText} title="لا توجد عمليات بعد" text="أضف أول دخل أو مصروف لتبدأ المتابعة." />;
   return <div className="transaction-list">{transactions.map(tx => {
     const category = data.categories.find(c => c.id === tx.categoryId)?.name || 'غير مصنف';
+    const account = data.accounts.find(a => a.id === tx.accountId)?.name || 'حساب محذوف';
     return <article className="transaction-row" key={tx.id}>
       <span className={`transaction-icon ${tx.type}`}><Tag size={19} /></span>
-      <div className="transaction-copy"><strong>{tx.title}</strong><small>{category} · {shortDate(tx.date)}</small></div>
+      <div className="transaction-copy"><strong>{tx.title}</strong><small>{category} · {account} · {shortDate(tx.date)}</small></div>
       <b className={tx.type}><bdi>{tx.type === 'income' ? '+' : '−'} {money(tx.amount)}</bdi></b>
       {onDelete && <button className="delete-mini" onClick={() => onDelete(tx.id)} aria-label={`حذف عملية ${tx.title}`}><Trash2 size={17} /></button>}
     </article>;
@@ -350,7 +361,7 @@ function PageTitle({ eyebrow, title, text }) {
   return <div className="page-title"><span>{eyebrow}</span><h1>{title}</h1><p>{text}</p></div>;
 }
 
-function Modal({ type, data, setData, onClose, onTransaction, notify }) {
+function Modal({ type, data, totals, setData, onClose, onTransaction, notify }) {
   const dialogRef = useRef(null);
   const previousFocus = useRef(document.activeElement);
   useEffect(() => {
@@ -361,7 +372,7 @@ function Modal({ type, data, setData, onClose, onTransaction, notify }) {
   }, [onClose]);
 
   const [modalType, modalId] = type.split(':');
-  const titles = { transaction: 'عملية جديدة', incomeTransaction: 'إضافة دخل', expenseTransaction: 'إضافة مصروف', debt: 'إضافة دين', debtAction: 'إدارة الدين', shopping: 'إضافة طلب', shoppingEdit: 'تعديل الطلب', appointment: 'موعد شخصي', task: 'مهمة شخصية', account: 'حساب جديد', category: 'فئة جديدة', notifications: 'التنبيهات' };
+  const titles = { transaction: 'عملية جديدة', incomeTransaction: 'إضافة دخل', expenseTransaction: 'إضافة مصروف', balanceDetails: 'تفاصيل الرصيد', debt: 'إضافة دين', debtAction: 'إدارة الدين', shopping: 'إضافة طلب', shoppingEdit: 'تعديل الطلب', appointment: 'موعد شخصي', task: 'مهمة شخصية', account: 'حساب جديد', category: 'فئة جديدة', notifications: 'التنبيهات' };
   const isTransaction = ['transaction', 'incomeTransaction', 'expenseTransaction'].includes(modalType);
   const selectedDebt = data.debts.find(debt => debt.id === modalId);
   const selectedShopping = data.shopping.find(item => item.id === modalId);
@@ -370,6 +381,7 @@ function Modal({ type, data, setData, onClose, onTransaction, notify }) {
       <div className="sheet-handle" aria-hidden="true" />
       <div className="modal-head"><div><span>ميزان</span><h2 id="modal-title">{titles[modalType]}</h2></div><button onClick={onClose} aria-label="إغلاق"><X size={21} /></button></div>
       {isTransaction && <TransactionForm data={data} initialType={modalType === 'incomeTransaction' ? 'income' : 'expense'} lockType={modalType !== 'transaction'} onSubmit={values => { onTransaction(values); onClose(); }} />}
+      {modalType === 'balanceDetails' && <BalanceDetails data={data} totals={totals} />}
       {modalType === 'debt' && <DebtForm onSubmit={values => { setData(p => ({ ...p, debts: [{ id: uid('d'), paid: 0, history: [], ...values }, ...p.debts] })); notify('تمت إضافة الدين'); onClose(); }} />}
       {modalType === 'debtAction' && selectedDebt && <DebtActionForm debt={selectedDebt} accounts={data.accounts} onSubmit={values => {
         setData(p => {
@@ -398,6 +410,18 @@ function Modal({ type, data, setData, onClose, onTransaction, notify }) {
       {modalType === 'category' && <CategoryForm onSubmit={values => { setData(p => ({ ...p, categories: [...p.categories, { id: uid('c'), icon: values.kind === 'income' ? 'دخل' : 'مصروف', ...values }] })); notify('تمت إضافة الفئة'); onClose(); }} />}
       {modalType === 'notifications' && <NotificationPanel notify={notify} onClose={onClose} />}
     </section>
+  </div>;
+}
+
+function BalanceDetails({ data, totals }) {
+  return <div className="balance-details">
+    <div className="balance-details-total"><span>إجمالي رصيد الحسابات الآن</span><strong><bdi>{money(totals.balance)}</bdi></strong><small>محسوب من الرصيد الافتتاحي وجميع العمليات المسجلة</small></div>
+    <div className="balance-account-list">{data.accounts.map(account => {
+      const movements = data.transactions.filter(transaction => transaction.accountId === account.id).length;
+      return <div key={account.id}><i style={{ background: account.color }} /><span><strong>{account.name}</strong><small>{movements} عمليات مسجلة</small></span><b><bdi>{money(totals.accountBalances[account.id] ?? account.balance)}</bdi></b></div>;
+    })}</div>
+    <div className="month-summary"><div><span>دخل الشهر</span><b className="income"><bdi>{money(totals.income)}</bdi></b></div><div><span>مصروف الشهر</span><b className="expense"><bdi>{money(totals.expense)}</bdi></b></div></div>
+    <p className="calculation-note"><CheckCircle2 size={17} /> تتحدث هذه الأرقام مباشرة عند إضافة أو حذف أي عملية.</p>
   </div>;
 }
 
