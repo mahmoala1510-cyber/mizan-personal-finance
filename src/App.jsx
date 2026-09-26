@@ -173,6 +173,19 @@ function HomeView({ data, totals, onNavigate, onAdd }) {
       <div className="budget-line"><div><span>المصروف من الدخل</span><b>{expenseRatio}٪</b></div><progress value={expenseRatio} max="100" aria-label={`استهلكت ${expenseRatio} بالمئة من الدخل`} /></div>
     </section>
 
+    <section className="quick-actions" aria-label="إضافة عملية مالية">
+      <button className="quick-action income" onClick={() => onAdd('incomeTransaction')}>
+        <span><ArrowDownLeft size={21} /></span>
+        <span><strong>إضافة دخل</strong><small>اختر الحساب وسجّل المبلغ</small></span>
+        <Plus size={18} />
+      </button>
+      <button className="quick-action expense" onClick={() => onAdd('expenseTransaction')}>
+        <span><ArrowUpRight size={21} /></span>
+        <span><strong>إضافة مصروف</strong><small>سجّل الدفع أو اربطه بدين</small></span>
+        <Plus size={18} />
+      </button>
+    </section>
+
     <section className="section accounts-section" aria-labelledby="accounts-title">
       <div className="section-head"><h2 id="accounts-title">حساباتي</h2><button onClick={() => onAdd('account')}>إضافة حساب <Plus size={16} /></button></div>
       <div className="account-strip">
@@ -289,12 +302,13 @@ function Modal({ type, data, setData, onClose, onTransaction, notify }) {
     return () => { document.removeEventListener('keydown', handleKey); previousFocus.current?.focus(); };
   }, [onClose]);
 
-  const titles = { transaction: 'عملية جديدة', debt: 'إضافة دين', shopping: 'إضافة طلب', account: 'حساب جديد', category: 'فئة جديدة', notifications: 'التنبيهات' };
+  const titles = { transaction: 'عملية جديدة', incomeTransaction: 'إضافة دخل', expenseTransaction: 'إضافة مصروف', debt: 'إضافة دين', shopping: 'إضافة طلب', account: 'حساب جديد', category: 'فئة جديدة', notifications: 'التنبيهات' };
+  const isTransaction = ['transaction', 'incomeTransaction', 'expenseTransaction'].includes(type);
   return <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && onClose()}>
     <section className="modal-sheet" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="modal-title" tabIndex="-1">
       <div className="sheet-handle" aria-hidden="true" />
       <div className="modal-head"><div><span>ميزان</span><h2 id="modal-title">{titles[type]}</h2></div><button onClick={onClose} aria-label="إغلاق"><X size={21} /></button></div>
-      {type === 'transaction' && <TransactionForm data={data} onSubmit={values => { onTransaction(values); onClose(); }} />}
+      {isTransaction && <TransactionForm data={data} initialType={type === 'incomeTransaction' ? 'income' : 'expense'} lockType={type !== 'transaction'} onSubmit={values => { onTransaction(values); onClose(); }} />}
       {type === 'debt' && <DebtForm onSubmit={values => { setData(p => ({ ...p, debts: [{ id: uid('d'), paid: 0, ...values }, ...p.debts] })); notify('تمت إضافة الدين'); onClose(); }} />}
       {type === 'shopping' && <ShoppingForm onSubmit={values => { setData(p => ({ ...p, shopping: [{ id: uid('s'), done: false, ...values }, ...p.shopping] })); notify('أُضيف الطلب للقائمة'); onClose(); }} />}
       {type === 'account' && <AccountForm onSubmit={values => { setData(p => ({ ...p, accounts: [...p.accounts, { id: uid('a'), ...values }] })); notify('تمت إضافة الحساب'); onClose(); }} />}
@@ -307,17 +321,21 @@ function Modal({ type, data, setData, onClose, onTransaction, notify }) {
 function Field({ label, children }) { return <label className="field"><span>{label}</span>{children}</label>; }
 function SubmitButton({ children }) { return <button className="submit-button" type="submit">{children}<ChevronLeft size={19} /></button>; }
 
-function TransactionForm({ data, onSubmit }) {
-  const [form, setForm] = useState({ type: 'expense', title: '', amount: '', accountId: data.accounts[0]?.id || '', categoryId: data.categories.find(c => c.kind === 'expense')?.id || '', debtId: '' });
+function TransactionForm({ data, initialType = 'expense', lockType = false, onSubmit }) {
+  const [form, setForm] = useState({ type: initialType, title: '', amount: '', accountId: data.accounts[0]?.id || '', categoryId: data.categories.find(c => c.kind === initialType)?.id || '', isDebt: false, debtId: '' });
   const update = (key, value) => setForm(p => ({ ...p, [key]: value }));
   const categories = data.categories.filter(c => c.kind === form.type);
   useEffect(() => { if (!categories.some(c => c.id === form.categoryId)) update('categoryId', categories[0]?.id || ''); }, [form.type]);
-  return <form className="form" onSubmit={e => { e.preventDefault(); onSubmit({ ...form, amount: Number(form.amount), debtId: form.debtId || undefined }); }}>
-    <div className="segmented"><button type="button" className={form.type === 'expense' ? 'active' : ''} onClick={() => update('type','expense')}>مصروف</button><button type="button" className={form.type === 'income' ? 'active' : ''} onClick={() => update('type','income')}>دخل</button></div>
+  return <form className="form" onSubmit={e => { e.preventDefault(); const { isDebt, ...values } = form; onSubmit({ ...values, amount: Number(form.amount), debtId: isDebt ? form.debtId : undefined }); }}>
+    {!lockType && <div className="segmented"><button type="button" className={form.type === 'expense' ? 'active' : ''} onClick={() => update('type','expense')}>مصروف</button><button type="button" className={form.type === 'income' ? 'active' : ''} onClick={() => update('type','income')}>دخل</button></div>}
     <Field label="اسم العملية"><input required value={form.title} onChange={e => update('title', e.target.value)} placeholder="مثال: فاتورة الكهرباء" /></Field>
     <Field label="المبلغ"><div className="amount-input"><input required min="0.01" step="0.01" type="number" inputMode="decimal" value={form.amount} onChange={e => update('amount', e.target.value)} placeholder="0" /><span>ر.س</span></div></Field>
     <div className="field-row"><Field label="الحساب"><select required value={form.accountId} onChange={e => update('accountId', e.target.value)}>{data.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field><Field label="الفئة"><select required value={form.categoryId} onChange={e => update('categoryId', e.target.value)}>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field></div>
-    {data.debts.length > 0 && <Field label="ربط بدين (اختياري)"><select value={form.debtId} onChange={e => update('debtId', e.target.value)}><option value="">بدون ربط</option>{data.debts.map(d => <option key={d.id} value={d.id}>{d.person} — متبقي {money(d.amount - d.paid)}</option>)}</select><small className="hint">عند الحفظ سيُحدّث مبلغ السداد تلقائيًا.</small></Field>}
+    <label className="debt-toggle">
+      <span className="toggle-copy"><span className="toggle-icon"><HandCoins size={19} /></span><span><strong>هذه العملية مرتبطة بدين</strong><small>فعّلها إذا كان المبلغ سدادًا أو تحصيلًا لدين</small></span></span>
+      <span className="switch"><input type="checkbox" checked={form.isDebt} onChange={e => update('isDebt', e.target.checked)} aria-controls="debt-picker" /><span aria-hidden="true" /></span>
+    </label>
+    {form.isDebt && <div id="debt-picker">{data.debts.length > 0 ? <Field label="اختر الدين"><select required value={form.debtId} onChange={e => update('debtId', e.target.value)}><option value="" disabled>حدد الدين المرتبط</option>{data.debts.map(d => <option key={d.id} value={d.id}>{d.person} — متبقي {money(d.amount - d.paid)}</option>)}</select><small className="hint">عند الحفظ سيُحدّث المبلغ المسدد تلقائيًا.</small></Field> : <p className="form-note"><HandCoins size={18} />لا يوجد دين مسجل. أضف دينًا أولًا من صفحة الالتزامات.</p>}</div>}
     <SubmitButton>حفظ العملية</SubmitButton>
   </form>;
 }
