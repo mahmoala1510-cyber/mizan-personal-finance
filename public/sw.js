@@ -1,4 +1,4 @@
-const CACHE = 'mizan-v2';
+const CACHE = 'mizan-v3';
 const ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg'];
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS))));
 self.addEventListener('activate', event => event.waitUntil(Promise.all([

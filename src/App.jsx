@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDownLeft, ArrowUpRight, Bell, CalendarDays, Check, ChevronLeft,
-  CircleDollarSign, CreditCard, HandCoins, Home, Landmark, ListChecks,
-  MoreHorizontal, Plus, ReceiptText, Settings, ShoppingBag, Tag, Trash2,
+  CheckCircle2, Clock3, CreditCard, HandCoins, History, Home, Landmark, ListChecks,
+  MoreHorizontal, Pencil, Plus, ReceiptText, Settings, ShoppingBag, Tag, Trash2,
   WalletCards, X
 } from 'lucide-react';
 
@@ -23,11 +23,17 @@ const initialData = {
     { id: 't3', title: 'وقود', amount: 120, type: 'expense', accountId: 'a2', categoryId: 'c3', date: new Date(Date.now() - 172800000).toISOString() }
   ],
   debts: [
-    { id: 'd1', person: 'أحمد', amount: 650, paid: 200, direction: 'owedToMe', due: new Date(Date.now() + 6 * 86400000).toISOString().slice(0, 10), note: 'باقي ثمن الهاتف' }
+    { id: 'd1', person: 'أحمد', amount: 650, paid: 200, direction: 'owedToMe', note: 'باقي ثمن الهاتف', history: [{ id: 'dh1', type: 'payment', amount: 200, date: new Date().toISOString(), note: 'دفعة سابقة' }] }
   ],
   shopping: [
     { id: 's1', title: 'اشتراك الإنترنت', estimate: 140, done: false },
     { id: 's2', title: 'مستلزمات المنزل', estimate: 220, done: false }
+  ],
+  appointments: [
+    { id: 'ap1', title: 'موعد طبيب الأسنان', date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), time: '17:30', note: '' }
+  ],
+  tasks: [
+    { id: 'tk1', title: 'الاتصال بالوالدين', done: false, note: '' }
   ]
 };
 
@@ -35,6 +41,7 @@ const navItems = [
   { id: 'home', label: 'الرئيسية', icon: Home },
   { id: 'transactions', label: 'العمليات', icon: ReceiptText },
   { id: 'commitments', label: 'الالتزامات', icon: ListChecks },
+  { id: 'planner', label: 'يومي', icon: CalendarDays },
   { id: 'settings', label: 'الإعدادات', icon: Settings }
 ];
 
@@ -44,7 +51,17 @@ const uid = prefix => `${prefix}${Date.now()}${Math.random().toString(16).slice(
 
 function useStoredData() {
   const [data, setData] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('mizan-data')) || initialData; }
+    try {
+      const stored = JSON.parse(localStorage.getItem('mizan-data'));
+      if (!stored) return initialData;
+      return {
+        ...initialData,
+        ...stored,
+        appointments: stored.appointments || [],
+        tasks: stored.tasks || [],
+        debts: (stored.debts || []).map(debt => ({ ...debt, history: debt.history || [] }))
+      };
+    }
     catch { return initialData; }
   });
   useEffect(() => localStorage.setItem('mizan-data', JSON.stringify(data)), [data]);
@@ -57,23 +74,24 @@ function App() {
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState('');
   const [commitmentTab, setCommitmentTab] = useState('debts');
+  const [plannerTab, setPlannerTab] = useState('appointments');
 
   useEffect(() => {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     const todayKey = new Date().toISOString().slice(0, 10);
     if (localStorage.getItem('mizan-last-reminder') === todayKey) return;
-    const soon = data.debts.filter(debt => {
-      const days = Math.ceil((new Date(`${debt.due}T23:59:59`) - Date.now()) / 86400000);
-      return Number(debt.amount) > Number(debt.paid) && days >= 0 && days <= 3;
+    const soon = data.appointments.filter(appointment => {
+      const days = Math.ceil((new Date(`${appointment.date}T${appointment.time || '23:59'}`) - Date.now()) / 86400000);
+      return days >= 0 && days <= 1;
     });
     if (soon.length) {
-      new Notification('موعد مالي قريب', {
-        body: soon.length === 1 ? `دين ${soon[0].person} يستحق قريبًا.` : `لديك ${soon.length} ديون تستحق خلال ٣ أيام.`,
+      new Notification('موعد شخصي قريب', {
+        body: soon.length === 1 ? `${soon[0].title} قريبًا.` : `لديك ${soon.length} مواعيد خلال اليوم القادم.`,
         icon: '/icon.svg'
       });
       localStorage.setItem('mizan-last-reminder', todayKey);
     }
-  }, [data.debts]);
+  }, [data.appointments]);
 
   const totals = useMemo(() => {
     const income = data.transactions.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
@@ -90,7 +108,11 @@ function App() {
   const addTransaction = tx => {
     setData(prev => {
       const next = { ...prev, transactions: [{ id: uid('t'), date: new Date().toISOString(), ...tx }, ...prev.transactions] };
-      if (tx.debtId) next.debts = prev.debts.map(d => d.id === tx.debtId ? { ...d, paid: Math.min(Number(d.amount), Number(d.paid) + Number(tx.amount)) } : d);
+      if (tx.debtId) next.debts = prev.debts.map(d => d.id === tx.debtId ? {
+        ...d,
+        paid: Math.min(Number(d.amount), Number(d.paid) + Number(tx.amount)),
+        history: [{ id: uid('dh'), type: 'payment', amount: Number(tx.amount), date: new Date().toISOString(), note: tx.title }, ...(d.history || [])]
+      } : d);
       return next;
     });
     notify(tx.debtId ? 'حُفظت العملية وحُدّث الدين' : 'تمت إضافة العملية');
@@ -111,6 +133,7 @@ function App() {
   const quickAdd = () => {
     if (view === 'transactions' || view === 'home') setModal('transaction');
     else if (view === 'commitments') setModal(commitmentTab === 'debts' ? 'debt' : 'shopping');
+    else if (view === 'planner') setModal(plannerTab === 'appointments' ? 'appointment' : 'task');
     else setModal('account');
   };
 
@@ -133,7 +156,8 @@ function App() {
         <main>
           {view === 'home' && <HomeView data={data} totals={totals} onNavigate={setView} onAdd={setModal} />}
           {view === 'transactions' && <TransactionsView data={data} onDelete={id => setData(p => ({ ...p, transactions: p.transactions.filter(t => t.id !== id) }))} />}
-          {view === 'commitments' && <CommitmentsView data={data} tab={commitmentTab} setTab={setCommitmentTab} buyItem={buyItem} onDelete={(kind, id) => setData(p => ({ ...p, [kind]: p[kind].filter(x => x.id !== id) }))} />}
+          {view === 'commitments' && <CommitmentsView data={data} tab={commitmentTab} setTab={setCommitmentTab} buyItem={buyItem} setModal={setModal} onDelete={(kind, id) => setData(p => ({ ...p, [kind]: p[kind].filter(x => x.id !== id) }))} />}
+          {view === 'planner' && <PlannerView data={data} tab={plannerTab} setTab={setPlannerTab} setModal={setModal} setData={setData} />}
           {view === 'settings' && <SettingsView data={data} setData={setData} setModal={setModal} notify={notify} />}
         </main>
 
@@ -228,37 +252,71 @@ function TransactionsView({ data, onDelete }) {
   </div>;
 }
 
-function CommitmentsView({ data, tab, setTab, buyItem, onDelete }) {
+function CommitmentsView({ data, tab, setTab, buyItem, setModal, onDelete }) {
   return <div className="view page-view">
     <PageTitle eyebrow="لا شيء يفوتك" title="الالتزامات" text="ديونك وما تنوي شراءه، بدون تشتيت" />
     <div className="segmented" role="tablist" aria-label="نوع الالتزام">
       <button role="tab" aria-selected={tab === 'debts'} className={tab === 'debts' ? 'active' : ''} onClick={() => setTab('debts')}><HandCoins size={18} /> الديون <span>{data.debts.length}</span></button>
       <button role="tab" aria-selected={tab === 'shopping'} className={tab === 'shopping' ? 'active' : ''} onClick={() => setTab('shopping')}><ShoppingBag size={18} /> الطلبات <span>{data.shopping.filter(s => !s.done).length}</span></button>
     </div>
-    {tab === 'debts' ? <DebtList debts={data.debts} onDelete={id => onDelete('debts', id)} /> : <ShoppingList items={data.shopping} buyItem={buyItem} onDelete={id => onDelete('shopping', id)} />}
+    {tab === 'debts' ? <DebtList debts={data.debts} onManage={id => setModal(`debtAction:${id}`)} onDelete={id => onDelete('debts', id)} /> : <ShoppingList items={data.shopping} buyItem={buyItem} onEdit={id => setModal(`shoppingEdit:${id}`)} onDelete={id => onDelete('shopping', id)} />}
   </div>;
 }
 
-function DebtList({ debts, onDelete }) {
-  if (!debts.length) return <Empty icon={HandCoins} title="لا توجد ديون" text="أضف دينًا وحدد موعده، واربط به أي عملية سداد." />;
+function DebtList({ debts, onManage, onDelete }) {
+  if (!debts.length) return <Empty icon={HandCoins} title="لا توجد ديون" text="أضف دينًا، ثم سجّل عليه الزيادات وعمليات السداد." />;
   return <div className="commitment-list">{debts.map(d => {
     const percent = Math.min(100, Math.round((Number(d.paid) / Number(d.amount)) * 100));
+    const lastEntry = d.history?.[0];
     return <article className="debt-card" key={d.id}>
-      <div className="debt-top"><div className="avatar">{d.person.slice(0, 1)}</div><div><strong>{d.person}</strong><small>{d.direction === 'owedToMe' ? 'لي عنده' : 'له عندي'} · يستحق {shortDate(d.due)}</small></div><button onClick={() => onDelete(d.id)} aria-label={`حذف دين ${d.person}`}><Trash2 size={17} /></button></div>
+      <div className="debt-top"><div className="avatar">{d.person.slice(0, 1)}</div><div><strong>{d.person}</strong><small>{d.direction === 'owedToMe' ? 'لي عنده' : 'له عندي'} · {d.history?.length || 0} عمليات</small></div><button onClick={() => onDelete(d.id)} aria-label={`حذف دين ${d.person}`}><Trash2 size={17} /></button></div>
       <div className="debt-amount"><span>المتبقي</span><strong><bdi>{money(d.amount - d.paid)}</bdi></strong></div>
       <progress value={percent} max="100" aria-label={`تم سداد ${percent} بالمئة`} />
       <div className="debt-foot"><span>سُدّد <bdi>{money(d.paid)}</bdi></span><b>{percent}٪</b></div>
+      {lastEntry && <p className="last-debt-entry"><History size={14} /> آخر حركة: {lastEntry.type === 'payment' ? 'سداد' : 'زيادة'} <bdi>{money(lastEntry.amount)}</bdi></p>}
+      <button className="manage-debt" onClick={() => onManage(d.id)}><HandCoins size={17} /> إدارة الدين والعمليات</button>
     </article>;
   })}</div>;
 }
 
-function ShoppingList({ items, buyItem, onDelete }) {
+function ShoppingList({ items, buyItem, onEdit, onDelete }) {
   if (!items.length) return <Empty icon={ShoppingBag} title="قائمة الطلبات فارغة" text="أضف ما تنوي شراءه مع ميزانيته المتوقعة." />;
   return <div className="shopping-list">{items.map(item => <article className={`shopping-row ${item.done ? 'done' : ''}`} key={item.id}>
     <button className="check-button" onClick={() => !item.done && buyItem(item)} aria-label={item.done ? `${item.title} تم شراؤه` : `شراء ${item.title} وإضافته للمصروفات`}><Check size={18} /></button>
     <div><strong>{item.title}</strong><small>{item.done ? 'أضيفت إلى العمليات' : 'التكلفة المتوقعة'}</small></div>
     <b><bdi>{money(item.estimate)}</bdi></b>
-    <button className="delete-mini" onClick={() => onDelete(item.id)} aria-label={`حذف ${item.title}`}><Trash2 size={17} /></button>
+    <div className="row-actions"><button className="delete-mini" onClick={() => onEdit(item.id)} aria-label={`تعديل ${item.title}`}><Pencil size={16} /></button><button className="delete-mini" onClick={() => onDelete(item.id)} aria-label={`حذف ${item.title}`}><Trash2 size={17} /></button></div>
+  </article>)}</div>;
+}
+
+function PlannerView({ data, tab, setTab, setModal, setData }) {
+  const appointments = [...data.appointments].sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
+  return <div className="view page-view">
+    <PageTitle eyebrow="وقتك لك" title="يومي" text="مواعيدك ومهامك الشخصية في مكان هادئ وواضح" />
+    <div className="segmented" role="tablist" aria-label="تنظيم اليوم">
+      <button role="tab" aria-selected={tab === 'appointments'} className={tab === 'appointments' ? 'active' : ''} onClick={() => setTab('appointments')}><CalendarDays size={18} /> المواعيد <span>{data.appointments.length}</span></button>
+      <button role="tab" aria-selected={tab === 'tasks'} className={tab === 'tasks' ? 'active' : ''} onClick={() => setTab('tasks')}><CheckCircle2 size={18} /> المهام <span>{data.tasks.filter(task => !task.done).length}</span></button>
+    </div>
+    <div className="planner-head"><span>{tab === 'appointments' ? 'مواعيد شخصية فقط' : 'خطوات صغيرة لليوم'}</span><button onClick={() => setModal(tab === 'appointments' ? 'appointment' : 'task')}><Plus size={16} /> إضافة</button></div>
+    {tab === 'appointments' ? <AppointmentList items={appointments} onDelete={id => setData(p => ({ ...p, appointments: p.appointments.filter(x => x.id !== id) }))} /> : <TaskList items={data.tasks} onToggle={id => setData(p => ({ ...p, tasks: p.tasks.map(task => task.id === id ? { ...task, done: !task.done } : task) }))} onDelete={id => setData(p => ({ ...p, tasks: p.tasks.filter(x => x.id !== id) }))} />}
+  </div>;
+}
+
+function AppointmentList({ items, onDelete }) {
+  if (!items.length) return <Empty icon={CalendarDays} title="لا توجد مواعيد" text="أضف موعدك الشخصي القادم مع الوقت والملاحظات." />;
+  return <div className="planner-list">{items.map(item => <article className="appointment-row" key={item.id}>
+    <div className="date-tile"><strong>{new Intl.DateTimeFormat('ar-SA', { day: 'numeric' }).format(new Date(item.date))}</strong><span>{new Intl.DateTimeFormat('ar-SA', { month: 'short' }).format(new Date(item.date))}</span></div>
+    <div><strong>{item.title}</strong><small><Clock3 size={13} /> <bdi>{item.time}</bdi>{item.note ? ` · ${item.note}` : ''}</small></div>
+    <button className="delete-mini" onClick={() => onDelete(item.id)} aria-label={`حذف موعد ${item.title}`}><Trash2 size={17} /></button>
+  </article>)}</div>;
+}
+
+function TaskList({ items, onToggle, onDelete }) {
+  if (!items.length) return <Empty icon={CheckCircle2} title="لا توجد مهام" text="أضف مهمة شخصية تريد إنجازها اليوم." />;
+  return <div className="planner-list">{items.map(item => <article className={`task-row ${item.done ? 'done' : ''}`} key={item.id}>
+    <button className="check-button" onClick={() => onToggle(item.id)} aria-label={item.done ? `إعادة فتح مهمة ${item.title}` : `إكمال مهمة ${item.title}`}><Check size={18} /></button>
+    <div><strong>{item.title}</strong>{item.note && <small>{item.note}</small>}</div>
+    <button className="delete-mini" onClick={() => onDelete(item.id)} aria-label={`حذف مهمة ${item.title}`}><Trash2 size={17} /></button>
   </article>)}</div>;
 }
 
@@ -271,7 +329,7 @@ function SettingsView({ data, setData, setModal, notify }) {
     <SettingsSection title="الفئات" icon={Tag} action={() => setModal('category')}>
       {data.categories.map(c => <ManageRow key={c.id} title={c.name} subtitle={c.kind === 'income' ? 'دخل' : 'مصروف'} onDelete={() => setData(p => ({ ...p, categories: p.categories.filter(x => x.id !== c.id) }))} />)}
     </SettingsSection>
-    <button className="notification-setting" onClick={() => setModal('notifications')}><span><Bell size={20} /></span><div><strong>تنبيهات المواعيد</strong><small>ذكّرني بمواعيد الديون</small></div><ChevronLeft size={20} /></button>
+    <button className="notification-setting" onClick={() => setModal('notifications')}><span><Bell size={20} /></span><div><strong>تنبيهات المواعيد الشخصية</strong><small>ذكّرني بمواعيدي القريبة</small></div><ChevronLeft size={20} /></button>
     <button className="reset-button" onClick={() => { if (confirm('هل تريد إعادة البيانات التجريبية؟')) { setData(initialData); notify('تمت إعادة البيانات'); } }}>إعادة البيانات التجريبية</button>
   </div>;
 }
@@ -302,18 +360,43 @@ function Modal({ type, data, setData, onClose, onTransaction, notify }) {
     return () => { document.removeEventListener('keydown', handleKey); previousFocus.current?.focus(); };
   }, [onClose]);
 
-  const titles = { transaction: 'عملية جديدة', incomeTransaction: 'إضافة دخل', expenseTransaction: 'إضافة مصروف', debt: 'إضافة دين', shopping: 'إضافة طلب', account: 'حساب جديد', category: 'فئة جديدة', notifications: 'التنبيهات' };
-  const isTransaction = ['transaction', 'incomeTransaction', 'expenseTransaction'].includes(type);
+  const [modalType, modalId] = type.split(':');
+  const titles = { transaction: 'عملية جديدة', incomeTransaction: 'إضافة دخل', expenseTransaction: 'إضافة مصروف', debt: 'إضافة دين', debtAction: 'إدارة الدين', shopping: 'إضافة طلب', shoppingEdit: 'تعديل الطلب', appointment: 'موعد شخصي', task: 'مهمة شخصية', account: 'حساب جديد', category: 'فئة جديدة', notifications: 'التنبيهات' };
+  const isTransaction = ['transaction', 'incomeTransaction', 'expenseTransaction'].includes(modalType);
+  const selectedDebt = data.debts.find(debt => debt.id === modalId);
+  const selectedShopping = data.shopping.find(item => item.id === modalId);
   return <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && onClose()}>
     <section className="modal-sheet" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="modal-title" tabIndex="-1">
       <div className="sheet-handle" aria-hidden="true" />
-      <div className="modal-head"><div><span>ميزان</span><h2 id="modal-title">{titles[type]}</h2></div><button onClick={onClose} aria-label="إغلاق"><X size={21} /></button></div>
-      {isTransaction && <TransactionForm data={data} initialType={type === 'incomeTransaction' ? 'income' : 'expense'} lockType={type !== 'transaction'} onSubmit={values => { onTransaction(values); onClose(); }} />}
-      {type === 'debt' && <DebtForm onSubmit={values => { setData(p => ({ ...p, debts: [{ id: uid('d'), paid: 0, ...values }, ...p.debts] })); notify('تمت إضافة الدين'); onClose(); }} />}
-      {type === 'shopping' && <ShoppingForm onSubmit={values => { setData(p => ({ ...p, shopping: [{ id: uid('s'), done: false, ...values }, ...p.shopping] })); notify('أُضيف الطلب للقائمة'); onClose(); }} />}
-      {type === 'account' && <AccountForm onSubmit={values => { setData(p => ({ ...p, accounts: [...p.accounts, { id: uid('a'), ...values }] })); notify('تمت إضافة الحساب'); onClose(); }} />}
-      {type === 'category' && <CategoryForm onSubmit={values => { setData(p => ({ ...p, categories: [...p.categories, { id: uid('c'), icon: values.kind === 'income' ? 'دخل' : 'مصروف', ...values }] })); notify('تمت إضافة الفئة'); onClose(); }} />}
-      {type === 'notifications' && <NotificationPanel notify={notify} onClose={onClose} />}
+      <div className="modal-head"><div><span>ميزان</span><h2 id="modal-title">{titles[modalType]}</h2></div><button onClick={onClose} aria-label="إغلاق"><X size={21} /></button></div>
+      {isTransaction && <TransactionForm data={data} initialType={modalType === 'incomeTransaction' ? 'income' : 'expense'} lockType={modalType !== 'transaction'} onSubmit={values => { onTransaction(values); onClose(); }} />}
+      {modalType === 'debt' && <DebtForm onSubmit={values => { setData(p => ({ ...p, debts: [{ id: uid('d'), paid: 0, history: [], ...values }, ...p.debts] })); notify('تمت إضافة الدين'); onClose(); }} />}
+      {modalType === 'debtAction' && selectedDebt && <DebtActionForm debt={selectedDebt} accounts={data.accounts} onSubmit={values => {
+        setData(p => {
+          const amount = Number(values.amount);
+          const transactionType = values.action === 'payment' ? (selectedDebt.direction === 'iOwe' ? 'expense' : 'income') : (selectedDebt.direction === 'iOwe' ? 'income' : 'expense');
+          const categoryId = p.categories.find(category => category.kind === transactionType)?.id || '';
+          const title = `${values.action === 'payment' ? 'سداد' : 'زيادة دين'} — ${selectedDebt.person}`;
+          return {
+            ...p,
+            debts: p.debts.map(debt => debt.id === selectedDebt.id ? {
+              ...debt,
+              amount: values.action === 'increase' ? Number(debt.amount) + amount : Number(debt.amount),
+              paid: values.action === 'payment' ? Math.min(Number(debt.amount), Number(debt.paid) + amount) : Number(debt.paid),
+              history: [{ id: uid('dh'), type: values.action, amount, date: new Date().toISOString(), note: values.note }, ...(debt.history || [])]
+            } : debt),
+            transactions: [{ id: uid('t'), title, amount, type: transactionType, accountId: values.accountId, categoryId, date: new Date().toISOString(), debtId: selectedDebt.id, source: 'debt' }, ...p.transactions]
+          };
+        });
+        notify(values.action === 'payment' ? 'تم تسجيل السداد' : 'تمت زيادة الدين'); onClose();
+      }} />}
+      {modalType === 'shopping' && <ShoppingForm onSubmit={values => { setData(p => ({ ...p, shopping: [{ id: uid('s'), done: false, ...values }, ...p.shopping] })); notify('أُضيف الطلب للقائمة'); onClose(); }} />}
+      {modalType === 'shoppingEdit' && selectedShopping && <ShoppingForm initialValues={selectedShopping} submitLabel="حفظ التعديل" onSubmit={values => { setData(p => ({ ...p, shopping: p.shopping.map(item => item.id === selectedShopping.id ? { ...item, ...values } : item) })); notify('تم تعديل الطلب'); onClose(); }} />}
+      {modalType === 'appointment' && <AppointmentForm onSubmit={values => { setData(p => ({ ...p, appointments: [{ id: uid('ap'), ...values }, ...p.appointments] })); notify('تمت إضافة الموعد'); onClose(); }} />}
+      {modalType === 'task' && <TaskForm onSubmit={values => { setData(p => ({ ...p, tasks: [{ id: uid('tk'), done: false, ...values }, ...p.tasks] })); notify('تمت إضافة المهمة'); onClose(); }} />}
+      {modalType === 'account' && <AccountForm onSubmit={values => { setData(p => ({ ...p, accounts: [...p.accounts, { id: uid('a'), ...values }] })); notify('تمت إضافة الحساب'); onClose(); }} />}
+      {modalType === 'category' && <CategoryForm onSubmit={values => { setData(p => ({ ...p, categories: [...p.categories, { id: uid('c'), icon: values.kind === 'income' ? 'دخل' : 'مصروف', ...values }] })); notify('تمت إضافة الفئة'); onClose(); }} />}
+      {modalType === 'notifications' && <NotificationPanel notify={notify} onClose={onClose} />}
     </section>
   </div>;
 }
@@ -341,20 +424,52 @@ function TransactionForm({ data, initialType = 'expense', lockType = false, onSu
 }
 
 function DebtForm({ onSubmit }) {
-  const [form, setForm] = useState({ person: '', amount: '', direction: 'iOwe', due: new Date(Date.now() + 7*86400000).toISOString().slice(0,10), note: '' });
+  const [form, setForm] = useState({ person: '', amount: '', direction: 'iOwe', note: '' });
   return <form className="form" onSubmit={e => { e.preventDefault(); onSubmit({ ...form, amount: Number(form.amount) }); }}>
     <Field label="اسم الشخص"><input required value={form.person} onChange={e => setForm(p => ({...p, person:e.target.value}))} placeholder="اسم الشخص أو الجهة" /></Field>
     <Field label="المبلغ"><div className="amount-input"><input required min="1" type="number" value={form.amount} onChange={e => setForm(p => ({...p, amount:e.target.value}))} placeholder="0" /><span>ر.س</span></div></Field>
     <div className="segmented"><button type="button" className={form.direction === 'iOwe' ? 'active' : ''} onClick={() => setForm(p => ({...p,direction:'iOwe'}))}>له عندي</button><button type="button" className={form.direction === 'owedToMe' ? 'active' : ''} onClick={() => setForm(p => ({...p,direction:'owedToMe'}))}>لي عنده</button></div>
-    <Field label="موعد الاستحقاق"><input required type="date" value={form.due} onChange={e => setForm(p => ({...p,due:e.target.value}))} /></Field>
     <Field label="ملاحظة"><input value={form.note} onChange={e => setForm(p => ({...p,note:e.target.value}))} placeholder="اختياري" /></Field>
     <SubmitButton>إضافة الدين</SubmitButton>
   </form>;
 }
 
-function ShoppingForm({ onSubmit }) {
-  const [form, setForm] = useState({ title: '', estimate: '' });
-  return <form className="form" onSubmit={e => { e.preventDefault(); onSubmit({ ...form, estimate: Number(form.estimate) }); }}><Field label="ماذا تريد شراءه؟"><input required value={form.title} onChange={e => setForm(p=>({...p,title:e.target.value}))} placeholder="مثال: سماعات جديدة" /></Field><Field label="التكلفة المتوقعة"><div className="amount-input"><input required min="1" type="number" value={form.estimate} onChange={e => setForm(p=>({...p,estimate:e.target.value}))} placeholder="0" /><span>ر.س</span></div></Field><p className="form-note"><ShoppingBag size={18} />عند تأكيد الشراء ستُضاف القيمة إلى المصروفات مباشرة.</p><SubmitButton>إضافة للقائمة</SubmitButton></form>;
+function DebtActionForm({ debt, accounts, onSubmit }) {
+  const remaining = Math.max(0, Number(debt.amount) - Number(debt.paid));
+  const [form, setForm] = useState({ action: 'payment', amount: '', accountId: accounts[0]?.id || '', note: '' });
+  return <form className="form" onSubmit={e => { e.preventDefault(); onSubmit({ ...form, amount: Number(form.amount) }); }}>
+    <div className="debt-summary"><span>{debt.direction === 'owedToMe' ? 'لي عنده' : 'له عندي'}</span><strong>{debt.person}</strong><p>المتبقي <bdi>{money(remaining)}</bdi></p></div>
+    <div className="segmented"><button type="button" className={form.action === 'payment' ? 'active' : ''} onClick={() => setForm(p => ({ ...p, action: 'payment', amount: '' }))}>إضافة سداد</button><button type="button" className={form.action === 'increase' ? 'active' : ''} onClick={() => setForm(p => ({ ...p, action: 'increase', amount: '' }))}>زيادة الدين</button></div>
+    <Field label={form.action === 'payment' ? 'مبلغ السداد' : 'مبلغ الدين الإضافي'}><div className="amount-input"><input required min="1" max={form.action === 'payment' ? remaining : undefined} type="number" inputMode="decimal" value={form.amount} onChange={e => setForm(p => ({ ...p, amount: e.target.value }))} placeholder="0" /><span>ر.س</span></div></Field>
+    <Field label="الحساب"><select required value={form.accountId} onChange={e => setForm(p => ({ ...p, accountId: e.target.value }))}>{accounts.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select></Field>
+    <Field label="ملاحظة"><input value={form.note} onChange={e => setForm(p => ({ ...p, note: e.target.value }))} placeholder="مثال: الدفعة الأولى" /></Field>
+    {debt.history?.length > 0 && <div className="debt-history"><h3>آخر العمليات</h3>{debt.history.slice(0, 4).map(entry => <div key={entry.id}><span>{entry.type === 'payment' ? 'سداد' : 'زيادة دين'} · {shortDate(entry.date)}</span><b><bdi>{money(entry.amount)}</bdi></b></div>)}</div>}
+    <SubmitButton>{form.action === 'payment' ? 'تسجيل السداد' : 'إضافة المبلغ للدين'}</SubmitButton>
+  </form>;
+}
+
+function ShoppingForm({ initialValues, submitLabel = 'إضافة للقائمة', onSubmit }) {
+  const [form, setForm] = useState({ title: initialValues?.title || '', estimate: initialValues?.estimate || '' });
+  return <form className="form" onSubmit={e => { e.preventDefault(); onSubmit({ ...form, estimate: Number(form.estimate) }); }}><Field label="ماذا تريد شراءه؟"><input required value={form.title} onChange={e => setForm(p=>({...p,title:e.target.value}))} placeholder="مثال: سماعات جديدة" /></Field><Field label="المبلغ"><div className="amount-input"><input required min="1" type="number" value={form.estimate} onChange={e => setForm(p=>({...p,estimate:e.target.value}))} placeholder="0" /><span>ر.س</span></div></Field><p className="form-note"><ShoppingBag size={18} />يمكنك تعديل المبلغ الآن، وعند الشراء سيُسجّل كمصروف.</p><SubmitButton>{submitLabel}</SubmitButton></form>;
+}
+
+function AppointmentForm({ onSubmit }) {
+  const [form, setForm] = useState({ title: '', date: new Date().toISOString().slice(0, 10), time: '09:00', note: '' });
+  return <form className="form" onSubmit={e => { e.preventDefault(); onSubmit(form); }}>
+    <Field label="عنوان الموعد"><input required value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="مثال: موعد الطبيب" /></Field>
+    <div className="field-row"><Field label="التاريخ"><input required type="date" value={form.date} onChange={e => setForm(p => ({ ...p, date: e.target.value }))} /></Field><Field label="الوقت"><input required type="time" value={form.time} onChange={e => setForm(p => ({ ...p, time: e.target.value }))} /></Field></div>
+    <Field label="ملاحظة"><input value={form.note} onChange={e => setForm(p => ({ ...p, note: e.target.value }))} placeholder="المكان أو أي تفاصيل" /></Field>
+    <SubmitButton>حفظ الموعد</SubmitButton>
+  </form>;
+}
+
+function TaskForm({ onSubmit }) {
+  const [form, setForm] = useState({ title: '', note: '' });
+  return <form className="form" onSubmit={e => { e.preventDefault(); onSubmit(form); }}>
+    <Field label="اسم المهمة"><input required value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="مثال: إنهاء قراءة الكتاب" /></Field>
+    <Field label="ملاحظة"><input value={form.note} onChange={e => setForm(p => ({ ...p, note: e.target.value }))} placeholder="تفاصيل اختيارية" /></Field>
+    <SubmitButton>إضافة المهمة</SubmitButton>
+  </form>;
 }
 
 function AccountForm({ onSubmit }) {
@@ -372,9 +487,9 @@ function NotificationPanel({ notify, onClose }) {
   const enable = async () => {
     if (!('Notification' in window)) return;
     const result = await Notification.requestPermission(); setPermission(result);
-    if (result === 'granted') { new Notification('ميزان جاهز', { body: 'سنذكّرك بمواعيدك المالية المهمة.', icon: '/icon.svg' }); notify('تم تفعيل الإشعارات'); onClose(); }
+    if (result === 'granted') { new Notification('ميزان جاهز', { body: 'سنذكّرك بمواعيدك الشخصية المهمة.', icon: '/icon.svg' }); notify('تم تفعيل الإشعارات'); onClose(); }
   };
-  return <div className="notification-panel"><span className="bell-hero"><Bell size={34} /></span><h3>{permission === 'granted' ? 'الإشعارات مفعّلة' : 'لا تنسَ مواعيدك المالية'}</h3><p>اسمح لميزان بإرسال تذكير قبل استحقاق الديون والمواعيد المهمة.</p>{permission !== 'granted' && permission !== 'unsupported' && <button className="submit-button" onClick={enable}>تفعيل الإشعارات <ChevronLeft size={19} /></button>}{permission === 'unsupported' && <p className="warning">متصفحك لا يدعم الإشعارات. ثبّت التطبيق أو استخدم Chrome على أندرويد.</p>}{permission === 'denied' && <p className="warning">الإذن مرفوض. يمكنك السماح به من إعدادات الموقع في المتصفح.</p>}</div>;
+  return <div className="notification-panel"><span className="bell-hero"><Bell size={34} /></span><h3>{permission === 'granted' ? 'الإشعارات مفعّلة' : 'لا تنسَ مواعيدك الشخصية'}</h3><p>اسمح لميزان بإرسال تذكير بمواعيدك الشخصية القريبة.</p>{permission !== 'granted' && permission !== 'unsupported' && <button className="submit-button" onClick={enable}>تفعيل الإشعارات <ChevronLeft size={19} /></button>}{permission === 'unsupported' && <p className="warning">متصفحك لا يدعم الإشعارات. ثبّت التطبيق أو استخدم Chrome على أندرويد.</p>}{permission === 'denied' && <p className="warning">الإذن مرفوض. يمكنك السماح به من إعدادات الموقع في المتصفح.</p>}</div>;
 }
 
 export default App;
