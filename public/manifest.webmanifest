@@ -1,0 +1,12 @@
+{
+  "name": "ميزان — منظّمك المالي",
+  "short_name": "ميزان",
+  "description": "حساباتك وديونك ومشترياتك في مكان واحد",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f5f3ed",
+  "theme_color": "#123e35",
+  "lang": "ar",
+  "dir": "rtl",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
