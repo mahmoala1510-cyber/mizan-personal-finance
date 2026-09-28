@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowDownLeft, ArrowUpRight, Bell, CalendarDays, Check, ChevronLeft,
-  CheckCircle2, Clock3, CreditCard, HandCoins, History, Home, Landmark, ListChecks,
+  ArrowDownLeft, ArrowUpRight, Bell, Check, ChevronLeft,
+  CheckCircle2, CreditCard, HandCoins, History, Home, Landmark, ListChecks,
   MoreHorizontal, Pencil, Plus, ReceiptText, Settings, ShoppingBag, Tag, Trash2,
   WalletCards, X
 } from 'lucide-react';
@@ -9,7 +9,7 @@ import {
 const initialData = {
   accounts: [
     { id: 'a1', name: 'المحفظة', type: 'نقدي', balance: 1200, color: '#b36b45' },
-    { id: 'a2', name: 'الحساب البنكي', type: 'بنكي', balance: 5840, color: '#286a5c' }
+    { id: 'a2', name: 'الحساب البنكي', type: 'بنكي', balance: 5840, color: '#286aa6' }
   ],
   categories: [
     { id: 'c1', name: 'راتب', kind: 'income', icon: 'دخل' },
@@ -29,19 +29,12 @@ const initialData = {
     { id: 's1', title: 'اشتراك الإنترنت', estimate: 140, done: false },
     { id: 's2', title: 'مستلزمات المنزل', estimate: 220, done: false }
   ],
-  appointments: [
-    { id: 'ap1', title: 'موعد طبيب الأسنان', date: new Date(Date.now() + 86400000).toISOString().slice(0, 10), time: '17:30', note: '' }
-  ],
-  tasks: [
-    { id: 'tk1', title: 'الاتصال بالوالدين', done: false, note: '' }
-  ]
 };
 
 const navItems = [
   { id: 'home', label: 'الرئيسية', icon: Home },
   { id: 'transactions', label: 'العمليات', icon: ReceiptText },
   { id: 'commitments', label: 'الالتزامات', icon: ListChecks },
-  { id: 'planner', label: 'يومي', icon: CalendarDays },
   { id: 'settings', label: 'الإعدادات', icon: Settings }
 ];
 
@@ -54,14 +47,15 @@ function useStoredData() {
     try {
       const stored = JSON.parse(localStorage.getItem('mizan-data'));
       if (!stored) return initialData;
+      const activeStored = { ...stored };
+      delete activeStored.appointments;
+      delete activeStored.tasks;
       return {
         ...initialData,
-        ...stored,
+        ...activeStored,
         accounts: Array.isArray(stored.accounts) ? stored.accounts : initialData.accounts,
         categories: Array.isArray(stored.categories) ? stored.categories : initialData.categories,
         transactions: Array.isArray(stored.transactions) ? stored.transactions : [],
-        appointments: Array.isArray(stored.appointments) ? stored.appointments : [],
-        tasks: Array.isArray(stored.tasks) ? stored.tasks : [],
         shopping: Array.isArray(stored.shopping) ? stored.shopping : [],
         debts: (Array.isArray(stored.debts) ? stored.debts : []).map(debt => ({ ...debt, history: Array.isArray(debt.history) ? debt.history : [] }))
       };
@@ -78,27 +72,13 @@ function App() {
   const [modal, setModal] = useState(null);
   const [toast, setToast] = useState('');
   const [commitmentTab, setCommitmentTab] = useState('debts');
-  const [plannerTab, setPlannerTab] = useState('appointments');
-
-  useEffect(() => {
-    if (!('Notification' in window) || Notification.permission !== 'granted') return;
-    const todayKey = new Date().toISOString().slice(0, 10);
-    if (localStorage.getItem('mizan-last-reminder') === todayKey) return;
-    const soon = data.appointments.filter(appointment => {
-      const days = Math.ceil((new Date(`${appointment.date}T${appointment.time || '23:59'}`) - Date.now()) / 86400000);
-      return days >= 0 && days <= 1;
-    });
-    if (soon.length) {
-      new Notification('موعد شخصي قريب', {
-        body: soon.length === 1 ? `${soon[0].title} قريبًا.` : `لديك ${soon.length} مواعيد خلال اليوم القادم.`,
-        icon: '/icon.svg'
-      });
-      localStorage.setItem('mizan-last-reminder', todayKey);
-    }
-  }, [data.appointments]);
 
   const totals = useMemo(() => {
     const now = new Date();
+    const isToday = transaction => {
+      const date = new Date(transaction.date);
+      return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+    };
     const isCurrentMonth = transaction => {
       const date = new Date(transaction.date);
       return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
@@ -108,11 +88,14 @@ function App() {
       balances[account.id] = Number(account.balance) + movement;
       return balances;
     }, {});
+    const todayTransactions = data.transactions.filter(isToday);
     const monthlyTransactions = data.transactions.filter(isCurrentMonth);
+    const todayIncome = todayTransactions.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+    const todayExpense = todayTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
     const income = monthlyTransactions.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
     const expense = monthlyTransactions.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
     const balance = data.accounts.reduce((sum, account) => sum + (accountBalances[account.id] || 0), 0);
-    return { income, expense, balance, accountBalances };
+    return { income, expense, todayIncome, todayExpense, balance, accountBalances };
   }, [data]);
 
   const notify = message => {
@@ -133,9 +116,7 @@ function App() {
     notify(tx.debtId ? 'حُفظت العملية وحُدّث الدين' : 'تمت إضافة العملية');
   };
 
-  const buyItem = item => {
-    const accountId = data.accounts[0]?.id;
-    const categoryId = data.categories.find(c => c.kind === 'expense')?.id;
+  const buyItem = (item, { accountId, categoryId }) => {
     if (!accountId || !categoryId) return notify('أضف حسابًا وفئة مصروف أولًا');
     setData(prev => ({
       ...prev,
@@ -148,7 +129,6 @@ function App() {
   const quickAdd = () => {
     if (view === 'transactions' || view === 'home') setModal('transaction');
     else if (view === 'commitments') setModal(commitmentTab === 'debts' ? 'debt' : 'shopping');
-    else if (view === 'planner') setModal(plannerTab === 'appointments' ? 'appointment' : 'task');
     else setModal('account');
   };
 
@@ -171,9 +151,8 @@ function App() {
         <main>
           {view === 'home' && <HomeView data={data} totals={totals} onNavigate={setView} onAdd={setModal} />}
           {view === 'transactions' && <TransactionsView data={data} onDelete={id => setData(p => ({ ...p, transactions: p.transactions.filter(t => t.id !== id) }))} />}
-          {view === 'commitments' && <CommitmentsView data={data} tab={commitmentTab} setTab={setCommitmentTab} buyItem={buyItem} setModal={setModal} onDelete={(kind, id) => setData(p => ({ ...p, [kind]: p[kind].filter(x => x.id !== id) }))} />}
-          {view === 'planner' && <PlannerView data={data} tab={plannerTab} setTab={setPlannerTab} setModal={setModal} setData={setData} />}
-          {view === 'settings' && <SettingsView data={data} setData={setData} setModal={setModal} notify={notify} />}
+          {view === 'commitments' && <CommitmentsView data={data} tab={commitmentTab} setTab={setCommitmentTab} setModal={setModal} onDelete={(kind, id) => setData(p => ({ ...p, [kind]: p[kind].filter(x => x.id !== id) }))} />}
+          {view === 'settings' && <SettingsView data={data} totals={totals} setData={setData} setModal={setModal} notify={notify} />}
         </main>
 
         <button className="fab" onClick={quickAdd} aria-label="إضافة جديد"><Plus size={27} /></button>
@@ -182,7 +161,7 @@ function App() {
         </nav>
       </div>
 
-      {modal && <Modal type={modal} data={data} totals={totals} setData={setData} onClose={() => setModal(null)} onTransaction={addTransaction} notify={notify} />}
+      {modal && <Modal type={modal} data={data} totals={totals} setData={setData} onClose={() => setModal(null)} onTransaction={addTransaction} onBuyItem={buyItem} notify={notify} />}
       <div className={`toast ${toast ? 'show' : ''}`} role="status" aria-live="polite"><Check size={18} />{toast}</div>
     </div>
   );
@@ -225,6 +204,16 @@ function HomeView({ data, totals, onNavigate, onAdd }) {
       </button>
     </section>
 
+    <section className="period-insights" aria-labelledby="period-insights-title">
+      <div className="section-head"><h2 id="period-insights-title">مؤشراتك المالية</h2><span>تتحدث تلقائيًا</span></div>
+      <div className="insight-grid">
+        <FinancialMetric period="اليوم" label="دخل اليوم" amount={totals.todayIncome} kind="income" />
+        <FinancialMetric period="اليوم" label="مصروف اليوم" amount={totals.todayExpense} kind="expense" />
+        <FinancialMetric period="هذا الشهر" label="دخل الشهر" amount={totals.income} kind="income" />
+        <FinancialMetric period="هذا الشهر" label="مصروف الشهر" amount={totals.expense} kind="expense" />
+      </div>
+    </section>
+
     <section className="section accounts-section" aria-labelledby="accounts-title">
       <div className="section-head"><h2 id="accounts-title">حساباتي</h2><button onClick={() => onAdd('account')}>إضافة حساب <Plus size={16} /></button></div>
       <div className="account-strip">
@@ -240,6 +229,15 @@ function HomeView({ data, totals, onNavigate, onAdd }) {
       <TransactionList transactions={data.transactions.slice(0, 4)} data={data} />
     </section>
   </div>;
+}
+
+function FinancialMetric({ period, label, amount, kind }) {
+  const Icon = kind === 'income' ? ArrowDownLeft : ArrowUpRight;
+  return <article className={`financial-metric ${kind}`} aria-label={`${label}: ${money(amount)}`}>
+    <div><span className="metric-icon" aria-hidden="true"><Icon size={16} /></span><span className="metric-period">{period}</span></div>
+    <p>{label}</p>
+    <strong><bdi>{money(amount)}</bdi></strong>
+  </article>;
 }
 
 function TransactionList({ transactions, data, onDelete }) {
@@ -268,14 +266,14 @@ function TransactionsView({ data, onDelete }) {
   </div>;
 }
 
-function CommitmentsView({ data, tab, setTab, buyItem, setModal, onDelete }) {
+function CommitmentsView({ data, tab, setTab, setModal, onDelete }) {
   return <div className="view page-view">
     <PageTitle eyebrow="لا شيء يفوتك" title="الالتزامات" text="ديونك وما تنوي شراءه، بدون تشتيت" />
     <div className="segmented" role="tablist" aria-label="نوع الالتزام">
       <button role="tab" aria-selected={tab === 'debts'} className={tab === 'debts' ? 'active' : ''} onClick={() => setTab('debts')}><HandCoins size={18} /> الديون <span>{data.debts.length}</span></button>
       <button role="tab" aria-selected={tab === 'shopping'} className={tab === 'shopping' ? 'active' : ''} onClick={() => setTab('shopping')}><ShoppingBag size={18} /> الطلبات <span>{data.shopping.filter(s => !s.done).length}</span></button>
     </div>
-    {tab === 'debts' ? <DebtList debts={data.debts} onManage={id => setModal(`debtAction:${id}`)} onDelete={id => onDelete('debts', id)} /> : <ShoppingList items={data.shopping} buyItem={buyItem} onEdit={id => setModal(`shoppingEdit:${id}`)} onDelete={id => onDelete('shopping', id)} />}
+    {tab === 'debts' ? <DebtList debts={data.debts} onManage={id => setModal(`debtAction:${id}`)} onDelete={id => onDelete('debts', id)} /> : <ShoppingList items={data.shopping} onComplete={id => setModal(`shoppingComplete:${id}`)} onEdit={id => setModal(`shoppingEdit:${id}`)} onDelete={id => onDelete('shopping', id)} />}
   </div>;
 }
 
@@ -295,57 +293,43 @@ function DebtList({ debts, onManage, onDelete }) {
   })}</div>;
 }
 
-function ShoppingList({ items, buyItem, onEdit, onDelete }) {
+function ShoppingList({ items, onComplete, onEdit, onDelete }) {
   if (!items.length) return <Empty icon={ShoppingBag} title="قائمة الطلبات فارغة" text="أضف ما تنوي شراءه مع ميزانيته المتوقعة." />;
   return <div className="shopping-list">{items.map(item => <article className={`shopping-row ${item.done ? 'done' : ''}`} key={item.id}>
-    <button className="check-button" onClick={() => !item.done && buyItem(item)} aria-label={item.done ? `${item.title} تم شراؤه` : `شراء ${item.title} وإضافته للمصروفات`}><Check size={18} /></button>
+    <button className="check-button" onClick={() => !item.done && onComplete(item.id)} aria-label={item.done ? `${item.title} تم شراؤه` : `إتمام شراء ${item.title} واختيار الحساب والفئة`}><Check size={18} /></button>
     <div><strong>{item.title}</strong><small>{item.done ? 'أضيفت إلى العمليات' : 'التكلفة المتوقعة'}</small></div>
     <b><bdi>{money(item.estimate)}</bdi></b>
     <div className="row-actions"><button className="delete-mini" onClick={() => onEdit(item.id)} aria-label={`تعديل ${item.title}`}><Pencil size={16} /></button><button className="delete-mini" onClick={() => onDelete(item.id)} aria-label={`حذف ${item.title}`}><Trash2 size={17} /></button></div>
   </article>)}</div>;
 }
 
-function PlannerView({ data, tab, setTab, setModal, setData }) {
-  const appointments = [...data.appointments].sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`));
-  return <div className="view page-view">
-    <PageTitle eyebrow="وقتك لك" title="يومي" text="مواعيدك ومهامك الشخصية في مكان هادئ وواضح" />
-    <div className="segmented" role="tablist" aria-label="تنظيم اليوم">
-      <button role="tab" aria-selected={tab === 'appointments'} className={tab === 'appointments' ? 'active' : ''} onClick={() => setTab('appointments')}><CalendarDays size={18} /> المواعيد <span>{data.appointments.length}</span></button>
-      <button role="tab" aria-selected={tab === 'tasks'} className={tab === 'tasks' ? 'active' : ''} onClick={() => setTab('tasks')}><CheckCircle2 size={18} /> المهام <span>{data.tasks.filter(task => !task.done).length}</span></button>
-    </div>
-    <div className="planner-head"><span>{tab === 'appointments' ? 'مواعيد شخصية فقط' : 'خطوات صغيرة لليوم'}</span><button onClick={() => setModal(tab === 'appointments' ? 'appointment' : 'task')}><Plus size={16} /> إضافة</button></div>
-    {tab === 'appointments' ? <AppointmentList items={appointments} onDelete={id => setData(p => ({ ...p, appointments: p.appointments.filter(x => x.id !== id) }))} /> : <TaskList items={data.tasks} onToggle={id => setData(p => ({ ...p, tasks: p.tasks.map(task => task.id === id ? { ...task, done: !task.done } : task) }))} onDelete={id => setData(p => ({ ...p, tasks: p.tasks.filter(x => x.id !== id) }))} />}
-  </div>;
-}
+function SettingsView({ data, totals, setData, setModal, notify }) {
+  const deleteAccount = account => {
+    const linkedTransactions = data.transactions.filter(transaction => transaction.accountId === account.id).length;
+    if (linkedTransactions > 0) {
+      notify(`لا يمكن حذف ${account.name} لأنه مرتبط بـ ${linkedTransactions} عمليات`);
+      return;
+    }
+    if (data.accounts.length === 1) {
+      notify('أضف حسابًا آخر قبل حذف الحساب الوحيد');
+      return;
+    }
+    setData(previous => ({ ...previous, accounts: previous.accounts.filter(item => item.id !== account.id) }));
+    notify('تم حذف الحساب');
+  };
 
-function AppointmentList({ items, onDelete }) {
-  if (!items.length) return <Empty icon={CalendarDays} title="لا توجد مواعيد" text="أضف موعدك الشخصي القادم مع الوقت والملاحظات." />;
-  return <div className="planner-list">{items.map(item => <article className="appointment-row" key={item.id}>
-    <div className="date-tile"><strong>{new Intl.DateTimeFormat('ar-SA', { day: 'numeric' }).format(new Date(item.date))}</strong><span>{new Intl.DateTimeFormat('ar-SA', { month: 'short' }).format(new Date(item.date))}</span></div>
-    <div><strong>{item.title}</strong><small><Clock3 size={13} /> <bdi>{item.time}</bdi>{item.note ? ` · ${item.note}` : ''}</small></div>
-    <button className="delete-mini" onClick={() => onDelete(item.id)} aria-label={`حذف موعد ${item.title}`}><Trash2 size={17} /></button>
-  </article>)}</div>;
-}
-
-function TaskList({ items, onToggle, onDelete }) {
-  if (!items.length) return <Empty icon={CheckCircle2} title="لا توجد مهام" text="أضف مهمة شخصية تريد إنجازها اليوم." />;
-  return <div className="planner-list">{items.map(item => <article className={`task-row ${item.done ? 'done' : ''}`} key={item.id}>
-    <button className="check-button" onClick={() => onToggle(item.id)} aria-label={item.done ? `إعادة فتح مهمة ${item.title}` : `إكمال مهمة ${item.title}`}><Check size={18} /></button>
-    <div><strong>{item.title}</strong>{item.note && <small>{item.note}</small>}</div>
-    <button className="delete-mini" onClick={() => onDelete(item.id)} aria-label={`حذف مهمة ${item.title}`}><Trash2 size={17} /></button>
-  </article>)}</div>;
-}
-
-function SettingsView({ data, setData, setModal, notify }) {
   return <div className="view page-view settings-view">
     <PageTitle eyebrow="على طريقتك" title="الإعدادات" text="تحكّم بالحسابات والفئات والتنبيهات" />
     <SettingsSection title="الحسابات" icon={WalletCards} action={() => setModal('account')}>
-      {data.accounts.map(a => <ManageRow key={a.id} color={a.color} title={a.name} subtitle={a.type} value={money(a.balance)} onDelete={() => setData(p => ({ ...p, accounts: p.accounts.filter(x => x.id !== a.id) }))} />)}
+      {data.accounts.map(account => {
+        const transactionCount = data.transactions.filter(transaction => transaction.accountId === account.id).length;
+        return <ManageRow key={account.id} color={account.color} title={account.name} subtitle={`${account.type} · ${transactionCount} عمليات`} value={money(totals.accountBalances[account.id] ?? account.balance)} onEdit={() => setModal(`accountEdit:${account.id}`)} onDelete={() => deleteAccount(account)} />;
+      })}
     </SettingsSection>
     <SettingsSection title="الفئات" icon={Tag} action={() => setModal('category')}>
       {data.categories.map(c => <ManageRow key={c.id} title={c.name} subtitle={c.kind === 'income' ? 'دخل' : 'مصروف'} onDelete={() => setData(p => ({ ...p, categories: p.categories.filter(x => x.id !== c.id) }))} />)}
     </SettingsSection>
-    <button className="notification-setting" onClick={() => setModal('notifications')}><span><Bell size={20} /></span><div><strong>تنبيهات المواعيد الشخصية</strong><small>ذكّرني بمواعيدي القريبة</small></div><ChevronLeft size={20} /></button>
+    <button className="notification-setting" onClick={() => setModal('notifications')}><span><Bell size={20} /></span><div><strong>إشعارات التطبيق</strong><small>إدارة إذن الإشعارات على هذا الجهاز</small></div><ChevronLeft size={20} /></button>
     <button className="reset-button" onClick={() => { if (confirm('هل تريد إعادة البيانات التجريبية؟')) { setData(initialData); notify('تمت إعادة البيانات'); } }}>إعادة البيانات التجريبية</button>
   </div>;
 }
@@ -354,8 +338,8 @@ function SettingsSection({ title, icon: Icon, action, children }) {
   return <section className="settings-card"><div className="settings-card-head"><div><Icon size={19} /><h2>{title}</h2></div><button onClick={action}><Plus size={16} /> إضافة</button></div><div>{children}</div></section>;
 }
 
-function ManageRow({ color, title, subtitle, value, onDelete }) {
-  return <div className="manage-row"><i style={{ background: color || '#d6a868' }} /><div><strong>{title}</strong><small>{subtitle}</small></div>{value && <b><bdi>{value}</bdi></b>}<button onClick={onDelete} aria-label={`حذف ${title}`}><Trash2 size={17} /></button></div>;
+function ManageRow({ color, title, subtitle, value, onEdit, onDelete }) {
+  return <div className="manage-row"><i style={{ background: color || '#d6a868' }} /><div><strong>{title}</strong><small>{subtitle}</small></div>{value && <b><bdi>{value}</bdi></b>}<div className="manage-actions">{onEdit && <button onClick={onEdit} aria-label={`تعديل ${title}`}><Pencil size={16} /></button>}<button onClick={onDelete} aria-label={`حذف ${title}`}><Trash2 size={17} /></button></div></div>;
 }
 
 function Empty({ icon: Icon, title, text }) {
@@ -366,7 +350,7 @@ function PageTitle({ eyebrow, title, text }) {
   return <div className="page-title"><span>{eyebrow}</span><h1>{title}</h1><p>{text}</p></div>;
 }
 
-function Modal({ type, data, totals, setData, onClose, onTransaction, notify }) {
+function Modal({ type, data, totals, setData, onClose, onTransaction, onBuyItem, notify }) {
   const dialogRef = useRef(null);
   const previousFocus = useRef(document.activeElement);
   useEffect(() => {
@@ -377,10 +361,11 @@ function Modal({ type, data, totals, setData, onClose, onTransaction, notify }) 
   }, [onClose]);
 
   const [modalType, modalId] = type.split(':');
-  const titles = { transaction: 'عملية جديدة', incomeTransaction: 'إضافة دخل', expenseTransaction: 'إضافة مصروف', balanceDetails: 'تفاصيل الرصيد', debt: 'إضافة دين', debtAction: 'إدارة الدين', shopping: 'إضافة طلب', shoppingEdit: 'تعديل الطلب', appointment: 'موعد شخصي', task: 'مهمة شخصية', account: 'حساب جديد', category: 'فئة جديدة', notifications: 'التنبيهات' };
+  const titles = { transaction: 'عملية جديدة', incomeTransaction: 'إضافة دخل', expenseTransaction: 'إضافة مصروف', balanceDetails: 'تفاصيل الرصيد', debt: 'إضافة دين', debtAction: 'إدارة الدين', shopping: 'إضافة طلب', shoppingEdit: 'تعديل الطلب', shoppingComplete: 'إتمام الطلب', account: 'حساب جديد', accountEdit: 'تعديل الحساب', category: 'فئة جديدة', notifications: 'التنبيهات' };
   const isTransaction = ['transaction', 'incomeTransaction', 'expenseTransaction'].includes(modalType);
   const selectedDebt = data.debts.find(debt => debt.id === modalId);
   const selectedShopping = data.shopping.find(item => item.id === modalId);
+  const selectedAccount = data.accounts.find(account => account.id === modalId);
   return <div className="modal-backdrop" onMouseDown={e => e.target === e.currentTarget && onClose()}>
     <section className="modal-sheet" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="modal-title" tabIndex="-1">
       <div className="sheet-handle" aria-hidden="true" />
@@ -409,9 +394,9 @@ function Modal({ type, data, totals, setData, onClose, onTransaction, notify }) 
       }} />}
       {modalType === 'shopping' && <ShoppingForm onSubmit={values => { setData(p => ({ ...p, shopping: [{ id: uid('s'), done: false, ...values }, ...p.shopping] })); notify('أُضيف الطلب للقائمة'); onClose(); }} />}
       {modalType === 'shoppingEdit' && selectedShopping && <ShoppingForm initialValues={selectedShopping} submitLabel="حفظ التعديل" onSubmit={values => { setData(p => ({ ...p, shopping: p.shopping.map(item => item.id === selectedShopping.id ? { ...item, ...values } : item) })); notify('تم تعديل الطلب'); onClose(); }} />}
-      {modalType === 'appointment' && <AppointmentForm onSubmit={values => { setData(p => ({ ...p, appointments: [{ id: uid('ap'), ...values }, ...p.appointments] })); notify('تمت إضافة الموعد'); onClose(); }} />}
-      {modalType === 'task' && <TaskForm onSubmit={values => { setData(p => ({ ...p, tasks: [{ id: uid('tk'), done: false, ...values }, ...p.tasks] })); notify('تمت إضافة المهمة'); onClose(); }} />}
+      {modalType === 'shoppingComplete' && selectedShopping && <ShoppingCompleteForm item={selectedShopping} accounts={data.accounts} categories={data.categories.filter(category => category.kind === 'expense')} onSubmit={values => { onBuyItem(selectedShopping, values); onClose(); }} />}
       {modalType === 'account' && <AccountForm onSubmit={values => { setData(p => ({ ...p, accounts: [...p.accounts, { id: uid('a'), ...values }] })); notify('تمت إضافة الحساب'); onClose(); }} />}
+      {modalType === 'accountEdit' && selectedAccount && <AccountForm initialValues={selectedAccount} submitLabel="حفظ التعديلات" onSubmit={values => { setData(p => ({ ...p, accounts: p.accounts.map(account => account.id === selectedAccount.id ? { ...account, ...values } : account) })); notify('تم تحديث الحساب والرصيد'); onClose(); }} />}
       {modalType === 'category' && <CategoryForm onSubmit={values => { setData(p => ({ ...p, categories: [...p.categories, { id: uid('c'), icon: values.kind === 'income' ? 'دخل' : 'مصروف', ...values }] })); notify('تمت إضافة الفئة'); onClose(); }} />}
       {modalType === 'notifications' && <NotificationPanel notify={notify} onClose={onClose} />}
     </section>
@@ -482,28 +467,23 @@ function ShoppingForm({ initialValues, submitLabel = 'إضافة للقائمة'
   return <form className="form" onSubmit={e => { e.preventDefault(); onSubmit({ ...form, estimate: Number(form.estimate) }); }}><Field label="ماذا تريد شراءه؟"><input required value={form.title} onChange={e => setForm(p=>({...p,title:e.target.value}))} placeholder="مثال: سماعات جديدة" /></Field><Field label="المبلغ"><div className="amount-input"><input required min="1" type="number" value={form.estimate} onChange={e => setForm(p=>({...p,estimate:e.target.value}))} placeholder="0" /><span>ر.س</span></div></Field><p className="form-note"><ShoppingBag size={18} />يمكنك تعديل المبلغ الآن، وعند الشراء سيُسجّل كمصروف.</p><SubmitButton>{submitLabel}</SubmitButton></form>;
 }
 
-function AppointmentForm({ onSubmit }) {
-  const [form, setForm] = useState({ title: '', date: new Date().toISOString().slice(0, 10), time: '09:00', note: '' });
-  return <form className="form" onSubmit={e => { e.preventDefault(); onSubmit(form); }}>
-    <Field label="عنوان الموعد"><input required value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="مثال: موعد الطبيب" /></Field>
-    <div className="field-row"><Field label="التاريخ"><input required type="date" value={form.date} onChange={e => setForm(p => ({ ...p, date: e.target.value }))} /></Field><Field label="الوقت"><input required type="time" value={form.time} onChange={e => setForm(p => ({ ...p, time: e.target.value }))} /></Field></div>
-    <Field label="ملاحظة"><input value={form.note} onChange={e => setForm(p => ({ ...p, note: e.target.value }))} placeholder="المكان أو أي تفاصيل" /></Field>
-    <SubmitButton>حفظ الموعد</SubmitButton>
+function ShoppingCompleteForm({ item, accounts, categories, onSubmit }) {
+  const [form, setForm] = useState({ accountId: accounts[0]?.id || '', categoryId: categories[0]?.id || '' });
+  if (!accounts.length || !categories.length) return <p className="form-note"><WalletCards size={18} />أضف حسابًا وفئة مصروف أولًا قبل إتمام الطلب.</p>;
+  return <form className="form" onSubmit={event => { event.preventDefault(); onSubmit(form); }}>
+    <div className="debt-summary"><span>الطلب المراد إتمامه</span><strong>{item.title}</strong><p>المبلغ <bdi>{money(item.estimate)}</bdi></p></div>
+    <div className="field-row">
+      <Field label="الحساب الذي تم الدفع منه"><select required value={form.accountId} onChange={event => setForm(previous => ({ ...previous, accountId: event.target.value }))}>{accounts.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}</select></Field>
+      <Field label="فئة المصروف"><select required value={form.categoryId} onChange={event => setForm(previous => ({ ...previous, categoryId: event.target.value }))}>{categories.map(category => <option key={category.id} value={category.id}>{category.name}</option>)}</select></Field>
+    </div>
+    <p className="form-note"><CheckCircle2 size={18} />بعد التأكيد سيظهر الطلب كمكتمل ويُضاف المبلغ للحساب والفئة المحددين.</p>
+    <SubmitButton>تأكيد الشراء وتسجيل المصروف</SubmitButton>
   </form>;
 }
 
-function TaskForm({ onSubmit }) {
-  const [form, setForm] = useState({ title: '', note: '' });
-  return <form className="form" onSubmit={e => { e.preventDefault(); onSubmit(form); }}>
-    <Field label="اسم المهمة"><input required value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} placeholder="مثال: إنهاء قراءة الكتاب" /></Field>
-    <Field label="ملاحظة"><input value={form.note} onChange={e => setForm(p => ({ ...p, note: e.target.value }))} placeholder="تفاصيل اختيارية" /></Field>
-    <SubmitButton>إضافة المهمة</SubmitButton>
-  </form>;
-}
-
-function AccountForm({ onSubmit }) {
-  const [form, setForm] = useState({ name: '', type: 'نقدي', balance: '', color: '#286a5c' });
-  return <form className="form" onSubmit={e => { e.preventDefault(); onSubmit({ ...form, balance:Number(form.balance) }); }}><Field label="اسم الحساب"><input required value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="مثال: محفظتي" /></Field><div className="field-row"><Field label="النوع"><select value={form.type} onChange={e=>setForm(p=>({...p,type:e.target.value}))}><option>نقدي</option><option>بنكي</option><option>بطاقة</option><option>ادخار</option></select></Field><Field label="الرصيد الافتتاحي"><input required type="number" value={form.balance} onChange={e=>setForm(p=>({...p,balance:e.target.value}))} placeholder="0" /></Field></div><Field label="لون الحساب"><div className="color-row">{['#286a5c','#b36b45','#3e5c76','#7a5969'].map(c=><button key={c} type="button" aria-label={`اختيار اللون ${c}`} className={form.color===c?'active':''} style={{background:c}} onClick={()=>setForm(p=>({...p,color:c}))} />)}</div></Field><SubmitButton>حفظ الحساب</SubmitButton></form>;
+function AccountForm({ initialValues, submitLabel = 'حفظ الحساب', onSubmit }) {
+  const [form, setForm] = useState({ name: initialValues?.name || '', type: initialValues?.type || 'نقدي', balance: initialValues?.balance ?? '', color: initialValues?.color || '#286aa6' });
+  return <form className="form" onSubmit={e => { e.preventDefault(); onSubmit({ ...form, balance:Number(form.balance) }); }}><Field label="اسم الحساب"><input required value={form.name} onChange={e=>setForm(p=>({...p,name:e.target.value}))} placeholder="مثال: محفظتي" /></Field><div className="field-row"><Field label="النوع"><select value={form.type} onChange={e=>setForm(p=>({...p,type:e.target.value}))}><option>نقدي</option><option>بنكي</option><option>بطاقة</option><option>ادخار</option></select></Field><Field label="الرصيد الافتتاحي"><input required step="0.01" type="number" inputMode="decimal" value={form.balance} onChange={e=>setForm(p=>({...p,balance:e.target.value}))} placeholder="0" /></Field></div>{initialValues && <p className="form-note"><WalletCards size={18} />الرصيد الحالي يُحسب تلقائيًا من الرصيد الافتتاحي وجميع العمليات المرتبطة بهذا الحساب.</p>}<Field label="لون الحساب"><div className="color-row">{['#286aa6','#b36b45','#3e5c76','#7a5969'].map(c=><button key={c} type="button" aria-label={`اختيار اللون ${c}`} className={form.color===c?'active':''} style={{background:c}} onClick={()=>setForm(p=>({...p,color:c}))} />)}</div></Field><SubmitButton>{submitLabel}</SubmitButton></form>;
 }
 
 function CategoryForm({ onSubmit }) {
@@ -516,9 +496,9 @@ function NotificationPanel({ notify, onClose }) {
   const enable = async () => {
     if (!('Notification' in window)) return;
     const result = await Notification.requestPermission(); setPermission(result);
-    if (result === 'granted') { new Notification('ميزان جاهز', { body: 'سنذكّرك بمواعيدك الشخصية المهمة.', icon: '/icon.svg' }); notify('تم تفعيل الإشعارات'); onClose(); }
+    if (result === 'granted') { new Notification('ميزان جاهز', { body: 'تم تفعيل إشعارات التطبيق على هذا الجهاز.', icon: '/icon.svg' }); notify('تم تفعيل الإشعارات'); onClose(); }
   };
-  return <div className="notification-panel"><span className="bell-hero"><Bell size={34} /></span><h3>{permission === 'granted' ? 'الإشعارات مفعّلة' : 'لا تنسَ مواعيدك الشخصية'}</h3><p>اسمح لميزان بإرسال تذكير بمواعيدك الشخصية القريبة.</p>{permission !== 'granted' && permission !== 'unsupported' && <button className="submit-button" onClick={enable}>تفعيل الإشعارات <ChevronLeft size={19} /></button>}{permission === 'unsupported' && <p className="warning">متصفحك لا يدعم الإشعارات. ثبّت التطبيق أو استخدم Chrome على أندرويد.</p>}{permission === 'denied' && <p className="warning">الإذن مرفوض. يمكنك السماح به من إعدادات الموقع في المتصفح.</p>}</div>;
+  return <div className="notification-panel"><span className="bell-hero"><Bell size={34} /></span><h3>{permission === 'granted' ? 'الإشعارات مفعّلة' : 'فعّل إشعارات ميزان'}</h3><p>اسمح لميزان بإظهار إشعارات التطبيق على هذا الجهاز.</p>{permission !== 'granted' && permission !== 'unsupported' && <button className="submit-button" onClick={enable}>تفعيل الإشعارات <ChevronLeft size={19} /></button>}{permission === 'unsupported' && <p className="warning">متصفحك لا يدعم الإشعارات. ثبّت التطبيق أو استخدم Chrome على أندرويد.</p>}{permission === 'denied' && <p className="warning">الإذن مرفوض. يمكنك السماح به من إعدادات الموقع في المتصفح.</p>}</div>;
 }
 
 export default App;
