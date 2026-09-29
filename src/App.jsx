@@ -106,14 +106,18 @@ function App() {
   const addTransaction = tx => {
     setData(prev => {
       const next = { ...prev, transactions: [{ id: uid('t'), date: new Date().toISOString(), ...tx }, ...prev.transactions] };
-      if (tx.debtId) next.debts = prev.debts.map(d => d.id === tx.debtId ? {
-        ...d,
-        paid: Math.min(Number(d.amount), Number(d.paid) + Number(tx.amount)),
-        history: [{ id: uid('dh'), type: 'payment', amount: Number(tx.amount), date: new Date().toISOString(), note: tx.title }, ...(d.history || [])]
-      } : d);
+      if (tx.debtId) {
+        const debtAction = tx.type === 'income' ? 'increase' : 'payment';
+        next.debts = prev.debts.map(d => d.id === tx.debtId ? {
+          ...d,
+          amount: debtAction === 'increase' ? Number(d.amount) + Number(tx.amount) : Number(d.amount),
+          paid: debtAction === 'payment' ? Math.min(Number(d.amount), Number(d.paid) + Number(tx.amount)) : Number(d.paid),
+          history: [{ id: uid('dh'), type: debtAction, amount: Number(tx.amount), date: new Date().toISOString(), note: tx.title }, ...(d.history || [])]
+        } : d);
+      }
       return next;
     });
-    notify(tx.debtId ? 'حُفظت العملية وحُدّث الدين' : 'تمت إضافة العملية');
+    notify(tx.debtId ? (tx.type === 'income' ? 'حُفظ الدخل وزاد مبلغ الدين' : 'حُفظ المصروف وسُجّل كسداد للدين') : 'تمت إضافة العملية');
   };
 
   const buyItem = (item, { accountId, categoryId }) => {
@@ -267,14 +271,41 @@ function TransactionsView({ data, onDelete }) {
 }
 
 function CommitmentsView({ data, tab, setTab, setModal, onDelete }) {
+  const debtSummary = data.debts.reduce((summary, debt) => {
+    const remaining = Math.max(0, Number(debt.amount) - Number(debt.paid));
+    const paid = Number(debt.paid) || 0;
+    if (debt.direction === 'iOwe') {
+      summary.remainingIOwe += remaining;
+      summary.paidByMe += paid;
+    } else {
+      summary.remainingOwedToMe += remaining;
+      summary.receivedByMe += paid;
+    }
+    summary.totalRemaining += remaining;
+    return summary;
+  }, { totalRemaining: 0, remainingIOwe: 0, remainingOwedToMe: 0, paidByMe: 0, receivedByMe: 0 });
+
   return <div className="view page-view">
     <PageTitle eyebrow="لا شيء يفوتك" title="الالتزامات" text="ديونك وما تنوي شراءه، بدون تشتيت" />
     <div className="segmented" role="tablist" aria-label="نوع الالتزام">
       <button role="tab" aria-selected={tab === 'debts'} className={tab === 'debts' ? 'active' : ''} onClick={() => setTab('debts')}><HandCoins size={18} /> الديون <span>{data.debts.length}</span></button>
       <button role="tab" aria-selected={tab === 'shopping'} className={tab === 'shopping' ? 'active' : ''} onClick={() => setTab('shopping')}><ShoppingBag size={18} /> الطلبات <span>{data.shopping.filter(s => !s.done).length}</span></button>
     </div>
-    {tab === 'debts' ? <DebtList debts={data.debts} onManage={id => setModal(`debtAction:${id}`)} onDelete={id => onDelete('debts', id)} /> : <ShoppingList items={data.shopping} onComplete={id => setModal(`shoppingComplete:${id}`)} onEdit={id => setModal(`shoppingEdit:${id}`)} onDelete={id => onDelete('shopping', id)} />}
+    {tab === 'debts' ? <><DebtOverview summary={debtSummary} /><DebtList debts={data.debts} onManage={id => setModal(`debtAction:${id}`)} onDelete={id => onDelete('debts', id)} /></> : <ShoppingList items={data.shopping} onComplete={id => setModal(`shoppingComplete:${id}`)} onEdit={id => setModal(`shoppingEdit:${id}`)} onDelete={id => onDelete('shopping', id)} />}
   </div>;
+}
+
+function DebtOverview({ summary }) {
+  const metrics = [
+    { label: 'المتبقي عليّ', value: summary.remainingIOwe, kind: 'outgoing', icon: ArrowUpRight },
+    { label: 'المتبقي لي', value: summary.remainingOwedToMe, kind: 'incoming', icon: ArrowDownLeft },
+    { label: 'ما تم سداده', value: summary.paidByMe, kind: 'outgoing', icon: CheckCircle2 },
+    { label: 'ما تم استلامه', value: summary.receivedByMe, kind: 'incoming', icon: HandCoins }
+  ];
+  return <section className="debt-overview" aria-labelledby="debt-overview-title">
+    <div className="debt-overview-total"><span id="debt-overview-title">إجمالي الديون المتبقية</span><strong><bdi>{money(summary.totalRemaining)}</bdi></strong><small>مجموع الديون التي عليك والتي لك</small></div>
+    <div className="debt-metrics">{metrics.map(({ label, value, kind, icon: Icon }) => <article key={label} className={`debt-metric ${kind}`} aria-label={`${label}: ${money(value)}`}><span aria-hidden="true"><Icon size={16} /></span><div><small>{label}</small><strong><bdi>{money(value)}</bdi></strong></div></article>)}</div>
+  </section>;
 }
 
 function DebtList({ debts, onManage, onDelete }) {
@@ -429,10 +460,10 @@ function TransactionForm({ data, initialType = 'expense', lockType = false, onSu
     <Field label="المبلغ"><div className="amount-input"><input required min="0.01" step="0.01" type="number" inputMode="decimal" value={form.amount} onChange={e => update('amount', e.target.value)} placeholder="0" /><span>ر.س</span></div></Field>
     <div className="field-row"><Field label="الحساب"><select required value={form.accountId} onChange={e => update('accountId', e.target.value)}>{data.accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></Field><Field label="الفئة"><select required value={form.categoryId} onChange={e => update('categoryId', e.target.value)}>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></Field></div>
     <label className="debt-toggle">
-      <span className="toggle-copy"><span className="toggle-icon"><HandCoins size={19} /></span><span><strong>هذه العملية مرتبطة بدين</strong><small>فعّلها إذا كان المبلغ سدادًا أو تحصيلًا لدين</small></span></span>
+      <span className="toggle-copy"><span className="toggle-icon"><HandCoins size={19} /></span><span><strong>هذه العملية مرتبطة بدين</strong><small>{form.type === 'income' ? 'سيزيد هذا الدخل مبلغ الدين' : 'سيُسجّل هذا المصروف كسداد للدين'}</small></span></span>
       <span className="switch"><input type="checkbox" checked={form.isDebt} onChange={e => update('isDebt', e.target.checked)} aria-controls="debt-picker" /><span aria-hidden="true" /></span>
     </label>
-    {form.isDebt && <div id="debt-picker">{data.debts.length > 0 ? <Field label="اختر الدين"><select required value={form.debtId} onChange={e => update('debtId', e.target.value)}><option value="" disabled>حدد الدين المرتبط</option>{data.debts.map(d => <option key={d.id} value={d.id}>{d.person} — متبقي {money(d.amount - d.paid)}</option>)}</select><small className="hint">عند الحفظ سيُحدّث المبلغ المسدد تلقائيًا.</small></Field> : <p className="form-note"><HandCoins size={18} />لا يوجد دين مسجل. أضف دينًا أولًا من صفحة الالتزامات.</p>}</div>}
+    {form.isDebt && <div id="debt-picker">{data.debts.length > 0 ? <Field label="اختر الدين"><select required value={form.debtId} onChange={e => update('debtId', e.target.value)}><option value="" disabled>حدد الدين المرتبط</option>{data.debts.map(d => <option key={d.id} value={d.id}>{d.person} — متبقي {money(d.amount - d.paid)}</option>)}</select><small className="hint">{form.type === 'income' ? 'سيُسجّل الدخل كزيادة جديدة على مبلغ الدين.' : 'سيُسجّل المصروف كعملية سداد للدين.'}</small></Field> : <p className="form-note"><HandCoins size={18} />لا يوجد دين مسجل. أضف دينًا أولًا من صفحة الالتزامات.</p>}</div>}
     <SubmitButton>حفظ العملية</SubmitButton>
   </form>;
 }
